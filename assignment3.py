@@ -1,57 +1,60 @@
-import csv
-import urllib.request
 import argparse
-import logging
+import csv
+import re
+import requests
 from datetime import datetime
 
-def downloadData(url):
-    response = urllib.request.urlopen(url)
-    return csv.reader(response.read().decode("utf-8").splitlines())
+def download_log_file(url):
+    response = requests.get(url)
+    return response.text
 
-def processData(csvData):
-    header = next(csvData)
-    invalid_rows = []
-    people = list(csvData)
-    with open("invalid_rows.txt", "w") as output_file:
-        for i, row in enumerate(people):
-            try:
-                birthdate = datetime.strptime(row[1], "%Y-%m-%d")
-            except ValueError:
-                invalid_rows.append(i + 2)
-        output_file.write(str(invalid_rows))
-    return people
+def process_file(file_content):
+    reader = csv.reader(file_content.splitlines())
+    return [row for row in reader]
 
-def displayPerson(id, personData):
-    for i, person in enumerate(personData):
-        if person[2] == str(id):
-            print("Name:", person[0])
-            print("Birthdate:", person[1])
-            return
-    print("Person not found")
+def search_for_image_hits(file_rows):
+    image_hits = 0
+    for row in file_rows:
+        if re.search(r'.*\.(jpg|gif|png)', row[0]):
+            image_hits += 1
+    total_hits = len(file_rows)
+    return (image_hits, (image_hits / total_hits) * 100)
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--url', required=True, help='The URL to download the data from')
-    args = parser.parse_args()
+def find_most_popular_browser(file_rows):
+    browser_counts = {'Firefox': 0, 'Chrome': 0, 'Internet Explorer': 0, 'Safari': 0}
+    for row in file_rows:
+        user_agent = row[2]
+        if re.search(r'Firefox', user_agent):
+            browser_counts['Firefox'] += 1
+        elif re.search(r'Chrome', user_agent):
+            browser_counts['Chrome'] += 1
+        elif re.search(r'Internet Explorer', user_agent):
+            browser_counts['Internet Explorer'] += 1
+        elif re.search(r'Safari', user_agent):
+            browser_counts['Safari'] += 1
+    return max(browser_counts, key=browser_counts.get)
 
-    logging.basicConfig(filename='errors.log', level=logging.ERROR,
-                        format='%(asctime)s:%(levelname)s:%(message)s')
-    logger = logging.getLogger('assignment2')
-
-    try:
-        csvData = downloadData(args.url)
-    except Exception as e:
-        logger.error(str(e))
-        print('An error occurred while downloading the data. Please check the errors.log for more details.')
-        return
-
-    personData = processData(csvData)
-
-    while True:
-        id = int(input('Enter an ID to lookup: '))
-        if id <= 0:
-            break
-        displayPerson(id, personData)
+def get_hits_per_hour(file_rows):
+    hour_counts = {i: 0 for i in range(24)}
+    for row in file_rows:
+        datetime_obj = datetime.strptime(row[1], "%Y-%m-%d %H:%M:%S")
+        hours = datetime_obj.hour
+        hour_counts[hours] += 1
+    return hour_counts
 
 if __name__ == '__main__':
-    main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--url', help='The URL of the log file')
+    args = parser.parse_args()
+
+    file_content = download_log_file(args.url)
+    file_rows = process_file(file_content)
+    image_hits, image_hits_percentage = search_for_image_hits(file_rows)
+    most_popular_browser = find_most_popular_browser(file_rows)
+    hour_counts = get_hits_per_hour(file_rows)
+
+    print(f'Image requests account for {image_hits_percentage:.1f}% of all requests')
+    print(f'The most popular browser is {most_popular_browser}')
+    print(hour_counts.items())
+    for hour, count in hour_counts.items():
+        print(f'Hour {hour} has {count} hits')
